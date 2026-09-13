@@ -1,0 +1,179 @@
+# ============================================================================
+# GitHub Actions Workflow for Fallout Build
+# ============================================================================
+#
+# Build Architecture:
+#   - Build Logic: All build logic is in Fallout (build/Build.cs)
+#   - CI/CD Orchestration: This workflow handles pipeline triggers and artifact publishing
+#   - Base Class: All DefaultBuilds inherit from GitHubActionsBuild
+#
+# Fallout Targets (defined in build/Build.cs and DefaultBuilds):
+#   - ReleasePackage: Compile → Test → Package → Push to NuGet feed
+#   - ReleaseVelopack: Compile → Test → Build Velopack → Upload to Azure Blob
+#   - TagRelease: Tag and push git release (auto-triggered on main branch)
+#
+# ============================================================================
+
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+      - 'bugfix/**'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'LICENSE'
+
+# ============================================================================
+# Build Job
+# ============================================================================
+jobs:
+  build:
+    name: 'Build, Test, and Package'
+    runs-on: windows-latest
+ 
+    permissions:
+      contents: write
+      packages: write
+      pull-requests: read
+      
+    steps:
+      # ----------------------------------------------------------------
+      # Setup: Checkout code with full history for GitVersion
+      # ----------------------------------------------------------------
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history required for GitVersion
+          token: ${{ secrets.GITHUB_TOKEN }}  # Allows 'git push' for TagRelease target
+
+      # ----------------------------------------------------------------
+      # Setup: Install .NET SDK
+      # ----------------------------------------------------------------
+      # The version comes from global.json so the runner installs exactly the SDK the
+      # repository is pinned to - a literal here would drift from the pin.
+      - name: Install the .NET SDK pinned in global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # ----------------------------------------------------------------
+      # Setup: Authenticate to GitHub Packages
+      #           dotnet nuget add source --username ${{ github.actor }} --password ${{ secrets.GH_PACKAGES_TOKEN }} --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" || echo "Package source already exists or failed to add, continuing..."
+      # ----------------------------------------------------------------
+      - name: Authenticate to GitHub Packages
+        run: |
+          dotnet nuget remove source github
+          dotnet nuget add source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --name github --username ${{ github.actor }}  --password ${{ secrets.GH_PACKAGES_TOKEN }} --store-password-in-clear-text  
+        shell: pwsh
+
+      # ----------------------------------------------------------------
+      # Build: Run Fallout Build (uses default target from Build.cs)
+      # Default target is ReleasePackage, which performs:
+      #   1. ShowVersion → Clean → Restore → Compile
+      #   2. ScanSecrets → UnitTests → IntegrationTests → CoverageReport
+      #   3. UpdateChangelog → Package → ReleasePackage (push to feed)
+      #   4. TagRelease (if main branch)
+      # ----------------------------------------------------------------
+      # The SAS token is mapped through env: rather than passed on the command line, where it
+      # would show up in process listings on the runner. Fallout resolves it from any of
+      # AZURE_BLOB_SAS_TOKEN_LOCAL, AZUREBLOBSASTOKEN or AZURE_BLOB_SAS_TOKEN; an unset secret
+      # expands to empty, in which case the Velopack targets warn and skip the upload.
+      - name: Execute Fallout Build
+        run: |
+          dotnet tool restore
+          dotnet run --project .\build\_build.csproj -- --artifacts-directory-param "${{ github.workspace }}\artifacts" --github-owner "${{ github.repository_owner }}"
+        shell: pwsh
+        env:
+          AZURE_BLOB_SAS_TOKEN_LOCAL: ${{ secrets.AZURE_BLOB_SAS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PACKAGES_TOKEN }}
+          # IPublishBlazorWasm clones the separate static-site repo, which the job's own
+          # GITHUB_TOKEN cannot reach — it needs a PAT with repo scope on that repo.
+          # Build.cs reads this via Environment.GetEnvironmentVariable, so without the
+          # mapping the token is null and Fallout builds the clone URL as
+          # "https://@github.com/..." — git then prompts for a password and dies on a
+          # runner with "Cannot prompt because user interactivity has been disabled".
+          # An unset secret expands to empty and fails identically, so check the secret
+          # exists before assuming the mapping is the problem.
+          STATIC_SITE_GITHUB_TOKEN: ${{ secrets.STATIC_SITE_GITHUB_TOKEN }}
+
+      # ----------------------------------------------------------------
+      # Publish: NuGet Packages
+      # ----------------------------------------------------------------
+      - name: Upload NuGet Packages
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuget-packages
+          path: ${{ github.workspace }}/artifacts/packages
+          if-no-files-found: ignore
+
+      # ----------------------------------------------------------------
+      # Publish: Code Coverage Results
+      # ----------------------------------------------------------------
+      - name: Extract Coverage Percentage
+        if: always()
+        id: coverage
+        shell: pwsh
+        run: |
+          $summaryFile = "${{ github.workspace }}/artifacts/coverage-report/Summary.json"
+          if (Test-Path $summaryFile) {
+            $json = Get-Content $summaryFile | ConvertFrom-Json
+            $coverage = [math]::Round($json.summary.linecoverage, 2)
+            echo "percentage=$coverage" >> $env:GITHUB_OUTPUT
+            echo "Coverage: $coverage%"
+          } else {
+            echo "percentage=0" >> $env:GITHUB_OUTPUT
+            echo "Coverage file not found"
+          }
+      
+      #      - name: Create Coverage Badge
+      #        if: always() && github.ref == 'refs/heads/main'
+      #        uses: schneegans/dynamic-badges-action@v1.7.0
+      #        with:
+      #          auth: ${{ secrets.GIST_SECRET }}
+      #          gistID: YOUR_GIST_ID_HERE
+      #          filename: coverage-badge.json
+      #          label: coverage
+      #          message: ${{ steps.coverage.outputs.percentage }}%
+      #          color: ${{ steps.coverage.outputs.percentage >= 80 && 'brightgreen' || steps.coverage.outputs.percentage >= 60 && 'yellow' || 'red' }}
+      
+      #     - name: Upload Coverage Report to Codecov
+      #       uses: codecov/codecov-action@v4
+      #       if: always()
+      #       continue-on-error: true
+      #       with:
+      #         files: ${{ github.workspace }}/artifacts/coverage-report/Cobertura.xml
+      #         fail_ci_if_error: false
+      #         token: ${{ secrets.CODECOV_TOKEN }}
+
+      # ----------------------------------------------------------------
+      # Publish: Coverage Report Artifact
+      # ----------------------------------------------------------------
+      - name: Upload Coverage Report Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: ${{ github.workspace }}/artifacts/coverage-report
+          if-no-files-found: ignore
+
+      # ----------------------------------------------------------------
+      # Publish: Test Results
+      # ----------------------------------------------------------------
+      - name: Publish Test Results
+        uses: dorny/test-reporter@v1
+        if: always()
+        continue-on-error: true
+        with:
+          name: 'Unit + Integration Tests'
+          path: ${{ github.workspace }}/artifacts/test-results/**/*.trx
+          reporter: dotnet-trx
+          fail-on-error: false

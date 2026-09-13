@@ -1,0 +1,19 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <!-- Fallout's build host. Part of the solution so it opens and refactors with everything
+       else, but never built by the solution: dotnet run builds it itself when a target runs,
+       and a solution build that compiled it too would lock its output under a running build. -->
+  <Project Path="build/_build.csproj">
+    <BuildType Solution="*|x64" Project="?" />
+    <BuildType Solution="*|x86" Project="?" />
+    <Platform Solution="*|x64" Project="?" />
+    <Platform Solution="*|x86" Project="?" />
+    <Build Project="false" />
+  </Project>
+  <Project Path="Greenlight.FalloutClient.UnitTests/Greenlight.FalloutClient.UnitTests.csproj" />
+  <Project Path="Greenlight.FalloutClient/Greenlight.FalloutClient.csproj" />
+</Solution>

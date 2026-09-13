@@ -1,0 +1,43 @@
+# GitVersion.yml
+mode: ContinuousDelivery
+assembly-versioning-scheme: MajorMinorPatch
+tag-pre-release-weight: 60000
+# Removed next-version since v1.0.0 tag exists - GitVersion will use tag as baseline
+tag-prefix: '[vV]?'
+branches:
+  main:
+    mode: ContinuousDeployment
+    increment: Patch
+    # Removed label for stable releases (no pre-release suffix)
+    regex: ^master$|^main$
+    is-main-branch: true
+    track-merge-target: false
+  feature:
+    mode: ContinuousDelivery
+    label: beta
+    increment: Patch
+    regex: ^feature(s)?[/-]
+    source-branches: ['main']
+    is-main-branch: false
+    pre-release-weight: 30000
+  bugfix:
+    mode: ContinuousDelivery
+    label: beta
+    increment: Patch
+    regex: ^bugfix(es)?[/-]
+    source-branches: ['main']
+    is-main-branch: false
+    pre-release-weight: 30000
+  pull-request:
+    mode: ContinuousDeployment
+    label: ''
+    increment: Inherit
+    regex: ^(pull|pull\-requests|pr)[/-]
+    source-branches: ['main', 'feature', 'bugfix']
+    is-main-branch: false
+    track-merge-target: false
+    label-number-pattern: '[/-](?<number>\d+)'
+    pre-release-weight: 30000
+
+ignore:
+  sha: []
