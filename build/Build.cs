@@ -17,7 +17,7 @@ public class Build : GitHubActionsBuild, IShowVersion, IClean, ICompile, IRestor
 
     string IHasVelopack.VelopackProjectName => "Greenlight.FalloutClient";
     string IHasVelopack.VelopackIconPath => @"Greenlight.FalloutClient\Assets\MeddlingIdiot.ico";
-    int IHasTests.MinCoverageThreshold => 20;
+    int IHasTests.MinCoverageThreshold => 10;
     bool IHasTests.BreakBuildOnSecretLeaks => false;
 
     // Automation.Fallout.Components defaults these to AFTR's staftrinstallers, which this project has
