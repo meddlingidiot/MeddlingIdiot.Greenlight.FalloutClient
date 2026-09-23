@@ -15,6 +15,17 @@ internal static class Program
         VelopackApp.Build().Run();
         VelopackBootstrapper.Startup("Greenlight.FalloutClient", args);
 
+        // One per session, and the second one leaves without a word. Two copies — the one
+        // Windows started and the one somebody launched by hand — would each react to the same
+        // build and fight over the screen, which looks like a bug in the client rather than
+        // like two of it.
+        //
+        // Taken after the Velopack hooks, so an install or an update running beside a copy that
+        // is already up is never turned away. Local\ is this logon session, so two people signed
+        // in to the same machine each get their own.
+        using var single = new Mutex(initiallyOwned: true, @"Local\Greenlight.FalloutClient", out var first);
+        if (!first) return;
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
     }
 
