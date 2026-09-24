@@ -38,7 +38,7 @@
   <!-- The SDK and the updater, the same way your own app would take them. -->
   <ItemGroup>
     <PackageReference Include="MeddlingIdiot.Greenlight.Sdk" Version="1.2.0" />
-    <PackageReference Include="MeddlingIdiot.Velopack" Version="1.2.0" />
+    <PackageReference Include="MeddlingIdiot.Velopack" Version="1.2.1" />
   </ItemGroup>
 
   <!-- The mascot, for the tray icon and the executable. Same icon the other apps use. -->
